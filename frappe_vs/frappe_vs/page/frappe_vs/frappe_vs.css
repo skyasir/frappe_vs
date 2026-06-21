@@ -176,6 +176,98 @@
 	background: var(--fvs-accent);
 }
 
+/* ------------------- Explorer tabs / fs roots ---------------------- */
+.fvs-explorer-tabs {
+	display: flex;
+	gap: 4px;
+	padding: 6px 8px 0;
+}
+.fvs-etab {
+	flex: 1 1 auto;
+	border: 1px solid var(--fvs-border);
+	background: var(--fvs-bg);
+	color: var(--fvs-muted);
+	font-size: 11px;
+	padding: 3px 6px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.fvs-etab.active {
+	background: var(--fvs-accent);
+	color: #fff;
+	border-color: var(--fvs-accent);
+}
+.fvs-fs-roots {
+	display: flex;
+	gap: 4px;
+	padding: 6px 8px 0;
+}
+.fvs-root-btn {
+	border: 1px solid var(--fvs-border);
+	background: var(--fvs-bg);
+	color: var(--fvs-muted);
+	font-size: 11px;
+	padding: 2px 10px;
+	border-radius: 10px;
+	cursor: pointer;
+}
+.fvs-root-btn.active {
+	background: var(--fvs-panel-2);
+	color: var(--fvs-fg);
+	font-weight: 600;
+}
+
+/* ---------------------------- FS tree ------------------------------ */
+.fvs-fs-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding-top: 3px;
+	padding-bottom: 3px;
+	padding-right: 8px;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+}
+.fvs-fs-row:hover {
+	background: var(--fvs-hover);
+}
+.fvs-fs-icon {
+	font-size: 12px;
+	flex: 0 0 auto;
+}
+.fvs-fs-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.fvs-fs-disabled {
+	color: var(--fvs-muted);
+	opacity: 0.7;
+}
+
+/* ------------------------- Context menu ---------------------------- */
+.fvs-context-menu {
+	position: fixed;
+	z-index: 1050;
+	min-width: 150px;
+	background: var(--fvs-panel);
+	border: 1px solid var(--fvs-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+	padding: 4px;
+	color: var(--fvs-fg);
+}
+.fvs-context-item {
+	padding: 5px 10px;
+	font-size: 12px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+.fvs-context-item:hover {
+	background: var(--fvs-accent);
+	color: #fff;
+}
+
 /* ------------------------------ Main ------------------------------- */
 .fvs-main {
 	flex: 1 1 auto;
