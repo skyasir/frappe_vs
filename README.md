@@ -3,7 +3,8 @@
 A VS Code-like IDE that lives **inside Frappe Desk**, powered by the
 [Monaco editor](https://microsoft.github.io/monaco-editor/).
 
-Open it at **`/app/frappe_vs`** (System Manager only).
+Open it at **`/app/frappe_vs`**, or from the **Frappe VS** workspace in the Desk
+sidebar (System Manager only).
 
 ## What it is
 
