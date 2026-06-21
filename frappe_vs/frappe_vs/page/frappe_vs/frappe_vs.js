@@ -125,13 +125,15 @@ frappe.frappe_vs.Workbench = class Workbench {
 					<div class="fvs-sidebar-head">
 						<span class="fvs-sidebar-title">${__("Explorer")}</span>
 						<span class="fvs-sidebar-actions">
-							<button class="fvs-icon-btn fvs-new" title="${__("New object")}">＋</button>
-							<button class="fvs-icon-btn fvs-refresh" title="${__("Reload tree")}">⟳</button>
+							<button class="fvs-icon-btn fvs-new" title="${__("New")}">＋</button>
+							<button class="fvs-icon-btn fvs-refresh" title="${__("Reload")}">⟳</button>
 						</span>
 					</div>
+					<div class="fvs-explorer-tabs" style="display:none"></div>
+					<div class="fvs-fs-roots" style="display:none"></div>
 					<div class="fvs-search">
 						<input type="text" class="fvs-search-input"
-							placeholder="${__("Filter open files…")}" spellcheck="false" />
+							placeholder="${__("Filter…")}" spellcheck="false" />
 					</div>
 					<div class="fvs-tree"></div>
 				</div>
@@ -159,14 +161,16 @@ frappe.frappe_vs.Workbench = class Workbench {
 
 		this.$tree = this.$root.find(".fvs-tree");
 		this.$banner = this.$root.find(".fvs-banner");
+		this.$explorer_tabs = this.$root.find(".fvs-explorer-tabs");
+		this.$fs_roots = this.$root.find(".fvs-fs-roots");
 		this.$tabbar = this.$root.find(".fvs-tabbar");
 		this.$editor = this.$root.find(".fvs-editor");
 		this.$welcome = this.$root.find(".fvs-welcome");
 		this.$status_left = this.$root.find(".fvs-status-left");
 		this.$status_right = this.$root.find(".fvs-status-right");
 
-		this.$root.find(".fvs-refresh").on("click", () => this.reload_tree());
-		this.$root.find(".fvs-new").on("click", () => this.open_new());
+		this.$root.find(".fvs-refresh").on("click", () => this.reload_explorer());
+		this.$root.find(".fvs-new").on("click", () => this.on_new_click());
 		this.$root.find(".fvs-search-input").on("input", (e) =>
 			this.filter_tree($(e.currentTarget).val())
 		);
@@ -183,11 +187,11 @@ frappe.frappe_vs.Workbench = class Workbench {
 			() => this.save_active(),
 			"es-line-save"
 		);
-		this.page.add_inner_button(__("New…"), () => this.open_new());
+		this.page.add_inner_button(__("New…"), () => this.on_new_click());
 		this.$theme_btn = this.page.add_inner_button(__("Toggle Theme"), () =>
 			this.toggle_theme()
 		);
-		this.page.add_inner_button(__("Reload Tree"), () => this.reload_tree());
+		this.page.add_inner_button(__("Reload"), () => this.reload_explorer());
 	}
 
 	bind_global_keys() {
@@ -219,12 +223,17 @@ frappe.frappe_vs.Workbench = class Workbench {
 			this.context = await frappe.xcall("frappe_vs.api.get_context");
 			this.registry = this.context.object_types;
 			this.developer_mode = this.context.developer_mode;
+			this.fs = this.context.filesystem || null;
 		} catch (e) {
 			this.set_status_left(__("Failed to load context"));
 			return;
 		}
+		// developer_mode ON -> default to the filesystem IDE (Mode A).
+		this.explorer_mode = this.developer_mode ? "fs" : "objects";
+		this.fs_root = (this.fs && this.fs.default_root) || "apps";
 		this.render_banner();
-		this.render_tree();
+		this.render_explorer_header();
+		this.render_explorer();
 		try {
 			await this.init_editor();
 		} catch (e) {
@@ -364,13 +373,12 @@ frappe.frappe_vs.Workbench = class Workbench {
 	/* ------------------------ Mode banner / New ------------------------- */
 
 	render_banner() {
-		if (this.developer_mode) {
-			// Mode A (filesystem IDE) is not built yet; Mode B is what runs now.
+		if (this.explorer_mode === "fs") {
 			this.$banner
 				.html(
-					`<span class="fvs-banner-tag">${__("developer_mode ON")}</span> ` +
+					`<span class="fvs-banner-tag">${__("Mode A · developer_mode")}</span> ` +
 						__(
-							"Full filesystem IDE (Mode A) arrives in the next build step — showing the safe object console (Mode B)."
+							"Filesystem IDE — edits write directly to real files under the bench. Changes take effect immediately."
 						)
 				)
 				.css("display", "")
@@ -385,6 +393,81 @@ frappe.frappe_vs.Workbench = class Workbench {
 				.css("display", "")
 				.removeClass("fvs-banner-dev")
 				.addClass("fvs-banner-safe");
+		}
+	}
+
+	/* --------------------- Explorer header / dispatch ------------------- */
+
+	render_explorer_header() {
+		// Files | Objects switch — only when developer_mode makes Mode A available.
+		if (this.developer_mode) {
+			this.$explorer_tabs.css("display", "").empty();
+			[
+				["fs", __("Files")],
+				["objects", __("Objects")],
+			].forEach(([mode, label]) => {
+				const $t = $(
+					`<button class="fvs-etab ${this.explorer_mode === mode ? "active" : ""}">${label}</button>`
+				);
+				$t.on("click", () => this.switch_explorer(mode));
+				this.$explorer_tabs.append($t);
+			});
+		}
+		this.render_fs_roots();
+	}
+
+	render_fs_roots() {
+		if (this.explorer_mode !== "fs") {
+			this.$fs_roots.css("display", "none");
+			return;
+		}
+		this.$fs_roots.css("display", "").empty();
+		[
+			["apps", __("apps")],
+			["", __("bench")],
+		].forEach(([root, label]) => {
+			const $b = $(
+				`<button class="fvs-root-btn ${this.fs_root === root ? "active" : ""}">${label}</button>`
+			);
+			$b.on("click", () => {
+				this.fs_root = root;
+				this.render_fs_roots();
+				this.render_explorer();
+			});
+			this.$fs_roots.append($b);
+		});
+	}
+
+	switch_explorer(mode) {
+		if (this.explorer_mode === mode) return;
+		this.explorer_mode = mode;
+		this.render_banner();
+		this.render_explorer_header();
+		this.render_explorer();
+	}
+
+	render_explorer() {
+		if (this.explorer_mode === "fs") {
+			this.render_fs_tree();
+		} else {
+			this.render_tree();
+		}
+	}
+
+	reload_explorer() {
+		if (this.explorer_mode === "fs") {
+			this.render_fs_tree();
+			frappe.show_alert({ message: __("Files reloaded"), indicator: "blue" });
+		} else {
+			this.reload_tree();
+		}
+	}
+
+	on_new_click() {
+		if (this.explorer_mode === "fs") {
+			this.fs_new_menu();
+		} else {
+			this.open_new();
 		}
 	}
 
@@ -469,6 +552,233 @@ frappe.frappe_vs.Workbench = class Workbench {
 		dialog.show();
 	}
 
+	/* --------------------- Filesystem tree (Mode A) --------------------- */
+
+	render_fs_tree() {
+		this.$tree.empty();
+		const $body = $('<div class="fvs-fs-rootbody"></div>').appendTo(this.$tree);
+		this.fs_load_into($body, this.fs_root, 0);
+	}
+
+	fs_load_into($container, path, depth) {
+		$container.html(`<div class="fvs-loading">${__("Loading…")}</div>`);
+		frappe
+			.xcall("frappe_vs.api.fs_list_dir", { path })
+			.then((res) => {
+				$container.empty();
+				if (!res.entries.length) {
+					$container.append(`<div class="fvs-tree-empty">${__("Empty folder")}</div>`);
+					return;
+				}
+				res.entries.forEach((item) => this.render_fs_row($container, item, depth));
+				this.refresh_tree_active();
+			})
+			.catch(() => {
+				$container.html(`<div class="fvs-tree-empty">${__("Cannot read folder")}</div>`);
+			});
+	}
+
+	render_fs_row($container, item, depth) {
+		const pad = 8 + depth * 12;
+		const esc = frappe.utils.escape_html;
+		if (item.type === "dir") {
+			const $row = $(`
+				<div class="fvs-fs-row fvs-fs-dir" style="padding-left:${pad}px">
+					<span class="fvs-chevron">▸</span>
+					<span class="fvs-fs-icon">📁</span>
+					<span class="fvs-fs-name">${esc(item.name)}</span>
+				</div>`);
+			const $body = $('<div class="fvs-fs-children" style="display:none"></div>');
+			let loaded = false;
+			$row.on("click", () => {
+				const open = $body.is(":visible");
+				$body.toggle(!open);
+				$row.find(".fvs-chevron").text(open ? "▸" : "▾");
+				if (!open && !loaded) {
+					loaded = true;
+					this.fs_load_into($body, item.path, depth + 1);
+				}
+			});
+			$row.on("contextmenu", (e) => this.fs_context_menu(e, item));
+			$container.append($row).append($body);
+		} else {
+			const icon = item.editable ? "📄" : item.secret ? "🔒" : "▦";
+			const $row = $(`
+				<div class="fvs-fs-row fvs-file ${item.editable ? "" : "fvs-fs-disabled"}"
+						data-key="fs::${esc(item.path)}" style="padding-left:${pad + 14}px"
+						title="${esc(item.path)}">
+					<span class="fvs-file-dot"></span>
+					<span class="fvs-fs-icon">${icon}</span>
+					<span class="fvs-file-name">${esc(item.name)}</span>
+				</div>`);
+			$row.on("click", () => {
+				if (item.editable) {
+					this.open_fs(item.path);
+				} else {
+					frappe.show_alert({
+						message: item.secret
+							? __("{0} is protected.", [item.name])
+							: __("{0} is not an editable file type.", [item.name]),
+						indicator: "orange",
+					});
+				}
+			});
+			$row.on("contextmenu", (e) => this.fs_context_menu(e, item));
+			$container.append($row);
+		}
+	}
+
+	async open_fs(path) {
+		const key = "fs::" + path;
+		if (this.files.has(key)) {
+			this.activate(key);
+			return;
+		}
+		let data;
+		try {
+			data = await frappe.xcall("frappe_vs.api.fs_read_file", { path });
+		} catch (e) {
+			return;
+		}
+		await fvs_load_monaco();
+		const model = this.monaco.editor.createModel(data.content, data.language);
+		const parent = data.path.split("/").slice(0, -1).join("/");
+		const file = {
+			key,
+			kind: "fs",
+			path: data.path,
+			name: data.name,
+			label: data.name,
+			sublabel: parent || ".",
+			language: data.language,
+			can_write: data.writable,
+			baseline: data.content,
+			dirty: false,
+			model,
+		};
+		model.onDidChangeContent(() => this.on_model_change(key));
+		this.files.set(key, file);
+		this.activate(key);
+	}
+
+	fs_context_menu(e, item) {
+		e.preventDefault();
+		this.close_context_menu();
+		const actions = [];
+		if (item.type === "dir") {
+			actions.push([__("New File…"), () => this.fs_create_dialog(item.path, "file")]);
+			actions.push([__("New Folder…"), () => this.fs_create_dialog(item.path, "folder")]);
+		}
+		actions.push([__("Rename…"), () => this.fs_rename_prompt(item)]);
+		actions.push([__("Delete"), () => this.fs_delete_prompt(item)]);
+
+		const $m = $('<div class="fvs-context-menu"></div>');
+		actions.forEach(([label, fn]) => {
+			$('<div class="fvs-context-item"></div>')
+				.text(label)
+				.on("click", () => {
+					this.close_context_menu();
+					fn();
+				})
+				.appendTo($m);
+		});
+		$m.css({ top: e.clientY + "px", left: e.clientX + "px" });
+		$("body").append($m);
+		this._ctxmenu = $m;
+		setTimeout(() => $(document).one("click.fvsctx", () => this.close_context_menu()), 0);
+	}
+
+	close_context_menu() {
+		if (this._ctxmenu) {
+			this._ctxmenu.remove();
+			this._ctxmenu = null;
+		}
+	}
+
+	fs_create_dialog(parent, fixedKind) {
+		const fields = [];
+		if (!fixedKind) {
+			fields.push({
+				fieldname: "kind",
+				label: __("Type"),
+				fieldtype: "Select",
+				options: "File\nFolder",
+				default: "File",
+				reqd: 1,
+			});
+		}
+		fields.push({
+			fieldname: "name",
+			label: __("Name"),
+			fieldtype: "Data",
+			reqd: 1,
+			description: parent ? __("Inside {0}", [parent]) : __("At the root"),
+		});
+		const d = new frappe.ui.Dialog({
+			title: fixedKind === "folder" ? __("New Folder") : __("New"),
+			fields,
+			primary_action_label: __("Create"),
+			primary_action: (v) => {
+				d.hide();
+				const kind = fixedKind || (v.kind === "Folder" ? "folder" : "file");
+				const path = (parent ? parent + "/" : "") + v.name;
+				this.do_fs_create(path, kind);
+			},
+		});
+		d.show();
+	}
+
+	do_fs_create(path, kind) {
+		const method =
+			kind === "folder" ? "frappe_vs.api.fs_create_folder" : "frappe_vs.api.fs_create_file";
+		const args = kind === "folder" ? { path } : { path, content: "" };
+		frappe.call({ method, args, freeze: true }).then((r) => {
+			if (!r || !r.message) return;
+			frappe.show_alert({ message: __("Created {0}", [r.message.path]), indicator: "green" });
+			this.render_fs_tree();
+			if (kind !== "folder") this.open_fs(r.message.path);
+		});
+	}
+
+	fs_rename_prompt(item) {
+		frappe.prompt(
+			{ fieldname: "name", label: __("New name"), fieldtype: "Data", reqd: 1, default: item.name },
+			(v) => {
+				const parent = item.path.split("/").slice(0, -1).join("/");
+				const new_path = (parent ? parent + "/" : "") + v.name;
+				frappe
+					.call({ method: "frappe_vs.api.fs_rename", args: { path: item.path, new_path }, freeze: true })
+					.then((r) => {
+						if (!r || !r.message) return;
+						const key = "fs::" + item.path;
+						if (this.files.has(key)) this.close_file(key, true);
+						frappe.show_alert({ message: __("Renamed to {0}", [r.message.path]), indicator: "green" });
+						this.render_fs_tree();
+					});
+			},
+			__("Rename"),
+			__("Rename")
+		);
+	}
+
+	fs_delete_prompt(item) {
+		frappe.confirm(__("Delete <b>{0}</b>? This cannot be undone.", [item.name]), () => {
+			frappe
+				.call({ method: "frappe_vs.api.fs_delete", args: { path: item.path }, freeze: true })
+				.then((r) => {
+					if (!r || !r.message) return;
+					const key = "fs::" + item.path;
+					if (this.files.has(key)) this.close_file(key, true);
+					frappe.show_alert({ message: __("Deleted {0}", [item.name]), indicator: "orange" });
+					this.render_fs_tree();
+				});
+		});
+	}
+
+	fs_new_menu() {
+		this.fs_create_dialog(this.fs_root, null);
+	}
+
 	/* ------------------------------ Files ------------------------------- */
 
 	file_key(doctype, name) {
@@ -494,8 +804,10 @@ frappe.frappe_vs.Workbench = class Workbench {
 		const model = this.monaco.editor.createModel(data.code, data.language);
 		const file = {
 			key,
+			kind: "object",
 			doctype,
 			name,
+			sublabel: doctype,
 			edit: data.edit,
 			field: data.field,
 			language: data.language,
@@ -541,7 +853,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.update_status();
 	}
 
-	close_file(key) {
+	close_file(key, force) {
 		const file = this.files.get(key);
 		if (!file) return;
 		const proceed = () => {
@@ -565,7 +877,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 				this.refresh_tree_active();
 			}
 		};
-		if (file.dirty) {
+		if (file.dirty && !force) {
 			frappe.confirm(
 				__("{0} has unsaved changes. Close without saving?", [file.label]),
 				proceed
@@ -585,7 +897,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 				<div class="fvs-tab ${active ? "fvs-tab-active" : ""}" data-key="${frappe.utils.escape_html(key)}">
 					<span class="fvs-tab-icon">${file.can_write ? "" : "🔒"}</span>
 					<span class="fvs-tab-label">${frappe.utils.escape_html(file.label)}</span>
-					<span class="fvs-tab-doctype">${frappe.utils.escape_html(file.doctype)}</span>
+					<span class="fvs-tab-doctype">${frappe.utils.escape_html(file.sublabel || "")}</span>
 					<span class="fvs-tab-close" title="${__("Close")}">${file.dirty ? "●" : "✕"}</span>
 				</div>
 			`);
@@ -635,23 +947,31 @@ frappe.frappe_vs.Workbench = class Workbench {
 			return;
 		}
 		const code = file.model.getValue();
+		const call =
+			file.kind === "fs"
+				? { method: "frappe_vs.api.fs_write_file", args: { path: file.path, content: code } }
+				: {
+						method: "frappe_vs.api.save_source",
+						args: {
+							object_type: file.doctype,
+							name: file.name,
+							code: code,
+							modified: file.modified,
+						},
+				  };
 		frappe
 			.call({
-				method: "frappe_vs.api.save_source",
-				args: {
-					object_type: file.doctype,
-					name: file.name,
-					code: code,
-					modified: file.modified,
-				},
+				...call,
 				freeze: true,
 				freeze_message: __("Saving {0}…", [file.label]),
 			})
 			.then((r) => {
 				if (!r || !r.message) return; // server error already shown
 				file.baseline = code;
-				file.modified = r.message.modified;
-				file.label = r.message.label || file.label;
+				if (file.kind !== "fs") {
+					file.modified = r.message.modified;
+					file.label = r.message.label || file.label;
+				}
 				file.dirty = false;
 				this.render_tabs();
 				this.refresh_tree_active();
@@ -694,10 +1014,11 @@ frappe.frappe_vs.Workbench = class Workbench {
 		const pos = this.editor.getPosition();
 		const ln = pos ? pos.lineNumber : 1;
 		const col = pos ? pos.column : 1;
-		const flags = [file.language.toUpperCase()];
+		const flags = [(file.language || "text").toUpperCase()];
 		if (!file.can_write) flags.push(__("read-only"));
 		if (file.dirty) flags.push(__("unsaved"));
-		this.set_status_left(`${file.doctype} › ${file.name}`);
+		const title = file.kind === "fs" ? file.path : `${file.doctype} › ${file.name}`;
+		this.set_status_left(title);
 		this.$status_right.text(`Ln ${ln}, Col ${col}    ${flags.join("  ·  ")}`);
 	}
 };

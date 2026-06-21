@@ -15,12 +15,33 @@ methods in [`frappe_vs/api.py`](frappe_vs/api.py).
 
 | Mode | When | What it does | Status |
 |------|------|--------------|--------|
-| **A** | `developer_mode` **ON** | Full filesystem IDE over the bench (browse/edit/create files, terminal, git diff). | _planned (steps 3–5)_ |
+| **A** | `developer_mode` **ON** | Full filesystem IDE over the bench (browse/edit/create/rename/delete files). | **shipped (file ops)** |
 | **B** | `developer_mode` **OFF** (and as a safe console anytime) | Create/edit DB-stored, framework-safe objects through the DocType API. | **shipped** |
 
 The active mode is detected server-side (`frappe.conf.developer_mode`) and
-returned by `get_context`. The filesystem endpoints (Mode A) are hard-gated by a
-server-side `developer_mode` check — the client is never trusted.
+returned by `get_context`. When `developer_mode` is on, the explorer also offers
+a **Files / Objects** switch (both consoles available). The filesystem endpoints
+(Mode A) are hard-gated by a server-side `developer_mode` check — the client is
+never trusted.
+
+## Mode A — filesystem IDE (shipped: file operations)
+
+A real file tree rooted at **`apps/`** (toggle to the whole bench), with
+open / edit / save / create / rename / delete in Monaco (language auto-detected
+by extension). Backend (all System-Manager + `developer_mode` gated):
+
+`fs_list_dir` · `fs_read_file` · `fs_write_file` · `fs_create_file` ·
+`fs_create_folder` · `fs_rename` · `fs_delete`
+
+**Path safety** (the security boundary, all server-side):
+
+1. `developer_mode` must be ON, else every endpoint refuses.
+2. Every path is resolved with `realpath` and **confined to the bench root** —
+   `..`, absolute paths, and symlinks that escape the bench are rejected.
+3. Reads/writes are limited to an **editable-extension allowlist** plus a
+   **secret-file denylist** (`site_config.json`, `*.key`/`*.pem`, `.env`, SSH
+   keys, …) — protected files cannot be opened or deleted. Non-empty folder
+   deletes and reads over 2 MB are refused.
 
 ## Mode B — safe object console (shipped)
 
@@ -68,7 +89,7 @@ vendor Monaco locally (run `./fetch_monaco.sh`) for offline / air-gapped use.
 
 1. ✅ App scaffold + Desk Page + Monaco mount + mode detection.
 2. ✅ Mode B — safe object editor + “New” scaffolding (works on any site).
-3. ⏳ Mode A file tree + read/edit/save/create/delete, `developer_mode`-gated,
+3. ✅ Mode A file tree + read/edit/save/create/rename/delete, `developer_mode`-gated,
    path-confined to the bench root.
 4. ⏳ Integrated terminal (xterm.js over a websocket).
 5. ⏳ Git diff + find-in-files + remaining VS Code polish.
