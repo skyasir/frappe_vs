@@ -65,6 +65,17 @@ def _require_developer_mode() -> None:
 		)
 
 
+def check_app_permission() -> bool:
+	"""Whether to show Frappe VS on the Desk apps screen (System Managers only).
+
+	Referenced by the ``add_to_apps_screen`` hook; called server-side with no
+	arguments and must return a bool.
+	"""
+	if frappe.session.user == "Administrator":
+		return True
+	return "System Manager" in frappe.get_roles()
+
+
 def _label(cfg: dict, doc) -> str:
 	label_field = cfg.get("label_field")
 	if label_field:
