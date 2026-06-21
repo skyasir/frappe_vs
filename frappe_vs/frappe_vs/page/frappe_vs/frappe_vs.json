@@ -1,0 +1,20 @@
+{
+ "creation": "2026-06-21 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "icon": "icon-code",
+ "idx": 0,
+ "modified": "2026-06-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Frappe VS",
+ "name": "frappe_vs",
+ "owner": "Administrator",
+ "page_name": "frappe_vs",
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ],
+ "standard": "Yes",
+ "title": "Frappe VS"
+}

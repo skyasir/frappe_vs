@@ -1,0 +1,18 @@
+[project]
+name = "frappe_vs"
+version = "0.1.0"
+description = "A VS Code-like IDE inside Frappe Desk, powered by the Monaco editor."
+authors = [
+    { name = "Frappe VS" },
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = { file = "license.txt" }
+dependencies = []
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.module]
+name = "frappe_vs"
