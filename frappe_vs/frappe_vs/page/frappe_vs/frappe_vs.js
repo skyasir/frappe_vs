@@ -103,21 +103,34 @@ function fvs_load_xterm() {
 	window.__fvs_xterm_promise = (async () => {
 		const css = document.createElement("link");
 		css.rel = "stylesheet";
-		css.href = `${FVS_XTERM_CDN}/css/xterm.css`;
+		css.href = `${FVS_XTERM_LOCAL}/xterm.css`;
 		css.onerror = () => {
-			css.href = `${FVS_XTERM_LOCAL}/xterm.css`;
+			css.href = `${FVS_XTERM_CDN}/css/xterm.css`;
 		};
 		document.head.appendChild(css);
 
-		const load = (cdn, local) =>
-			fvs_inject_script(cdn).catch(() => fvs_inject_script(local));
-		await load(`${FVS_XTERM_CDN}/lib/xterm.js`, `${FVS_XTERM_LOCAL}/xterm.js`);
-		await load(FVS_XTERM_FIT_CDN, `${FVS_XTERM_LOCAL}/xterm-addon-fit.js`);
+		// xterm ships as a UMD bundle: if a global AMD `define` exists it registers
+		// via AMD and never assigns window.Terminal. Monaco's AMD loader sets exactly
+		// such a `define`, so we stash and disable it while loading xterm, forcing
+		// the bundle to attach Terminal / FitAddon to window.*.
+		const load = (primary, fallback) =>
+			fvs_inject_script(primary).catch(() => fvs_inject_script(fallback));
+		const saved_define = window.define;
+		window.define = undefined;
+		try {
+			await load(`${FVS_XTERM_LOCAL}/xterm.js`, `${FVS_XTERM_CDN}/lib/xterm.js`);
+			await load(`${FVS_XTERM_LOCAL}/xterm-addon-fit.js`, FVS_XTERM_FIT_CDN);
+		} finally {
+			window.define = saved_define;
+		}
 
 		window.__fvs_xterm = {
 			Terminal: window.Terminal,
 			FitAddon: window.FitAddon && window.FitAddon.FitAddon,
 		};
+		if (!window.__fvs_xterm.Terminal) {
+			throw new Error("xterm loaded but window.Terminal is undefined");
+		}
 		return window.__fvs_xterm;
 	})();
 	return window.__fvs_xterm_promise;
@@ -1072,22 +1085,49 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.fit_addon = xt.FitAddon ? new xt.FitAddon() : null;
 		if (this.fit_addon) this.term.loadAddon(this.fit_addon);
 		this.term.open(this.$terminal_body.get(0));
+		// Fit once layout settles (the panel may not have its height yet).
 		this.fit_terminal();
-		this.term.writeln("\x1b[90mConnecting to the bench shell…\x1b[0m");
+		requestAnimationFrame(() => this.fit_terminal());
+		setTimeout(() => this.fit_terminal(), 60);
+		this.term.focus();
 		this.connect_terminal();
 	}
 
+	term_log(text, color) {
+		const codes = { cyan: 36, green: 32, red: 31, yellow: 33, grey: 90 };
+		this.term && this.term.writeln(`\x1b[${codes[color] || 0}m${text}\x1b[0m`);
+	}
+
 	connect_terminal() {
+		this.term_log("Starting bench shell…", "cyan");
 		frappe
 			.xcall("frappe_vs.api.terminal_start")
 			.then((info) => {
-				const url = `ws://${info.host}:${info.port}/?token=${encodeURIComponent(info.token)}`;
+				// Use the host the page is served from (it resolves to the same
+				// loopback the server binds to) rather than a hardcoded IP.
+				const host = window.location.hostname || info.host;
+				const url = `ws://${host}:${info.port}/?token=${encodeURIComponent(info.token)}`;
+				this.term_log(`Connecting to ${host}:${info.port} …`, "cyan");
 				const ws = new WebSocket(url);
 				ws.binaryType = "arraybuffer";
 				this.ws = ws;
 				const enc = new TextEncoder();
+				let opened = false;
+
+				this._ws_timer = setTimeout(() => {
+					if (!opened) {
+						this.term_log(
+							`Still connecting… check that nothing blocks port ${info.port} on ${host}. ` +
+								`Open DevTools → Console / Network (WS) for the exact reason.`,
+							"yellow"
+						);
+					}
+				}, 5000);
 
 				ws.onopen = () => {
+					opened = true;
+					clearTimeout(this._ws_timer);
+					this.term_log("Connected.\r", "green");
 					this.send_resize();
 					this._on_data = this.term.onData((d) => {
 						if (ws.readyState === 1) ws.send(enc.encode(d));
@@ -1098,15 +1138,27 @@ frappe.frappe_vs.Workbench = class Workbench {
 				ws.onmessage = (ev) => {
 					this.term.write(new Uint8Array(ev.data));
 				};
-				ws.onclose = () => {
-					this.term && this.term.writeln("\r\n\x1b[90m[session closed]\x1b[0m");
+				ws.onclose = (e) => {
+					clearTimeout(this._ws_timer);
+					if (!opened) {
+						this.term_log(
+							`Could not open the WebSocket (closed, code ${e.code}). The PTY server listens on ` +
+								`127.0.0.1, so this only works when your browser is on the same machine as the bench.`,
+							"red"
+						);
+					} else {
+						this.term_log("\n[session ended]", "grey");
+					}
 				};
 				ws.onerror = () => {
-					this.term && this.term.writeln("\r\n\x1b[31m[connection error]\x1b[0m");
+					this.term_log(`WebSocket error reaching ${host}:${info.port}.`, "red");
 				};
 			})
-			.catch(() => {
-				this.term && this.term.writeln("\r\n\x1b[31m[could not start terminal server]\x1b[0m");
+			.catch((e) => {
+				this.term_log(
+					"Could not start the terminal server: " + ((e && e.message) || "see Error Log"),
+					"red"
+				);
 			});
 	}
 
@@ -1125,6 +1177,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 	}
 
 	close_terminal() {
+		if (this._ws_timer) clearTimeout(this._ws_timer);
 		if (this._on_data) this._on_data.dispose();
 		if (this._on_resize) this._on_resize.dispose();
 		this._on_data = this._on_resize = null;

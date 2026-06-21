@@ -136,21 +136,31 @@ class PtyServer:
 		print(f"[fvs-pty] listening on {self.host}:{self.port} (bench={self.bench_root})", flush=True)
 		while True:
 			try:
-				conn, _addr = srv.accept()
+				conn, addr = srv.accept()
 			except OSError:
 				continue
+			self._log(f"TCP connection accepted from {addr}")
 			threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+
+	def _log(self, msg: str) -> None:
+		print(f"[fvs-pty] {msg}", flush=True)
 
 	# -- per connection ----------------------------------------------------- #
 	def _handle(self, conn: socket.socket):
 		try:
 			request = self._read_http_request(conn)
 			if request is None:
+				self._log("connection closed before a full HTTP request arrived")
 				conn.close()
 				return
 			headers, path = request
+			self._log(
+				f"handshake: origin={headers.get('origin')!r} "
+				f"upgrade={headers.get('upgrade')!r} token={'yes' if 'token=' in path else 'no'}"
+			)
 			key = headers.get("sec-websocket-key")
 			if not key:
+				self._log("rejected: no Sec-WebSocket-Key (not a websocket request)")
 				conn.sendall(b"HTTP/1.1 400 Bad Request\r\n\r\n")
 				conn.close()
 				return
@@ -158,14 +168,17 @@ class PtyServer:
 			token = self._token_from_path(path)
 			user = self._consume_token(token)
 			if not user:
+				self._log("rejected: token missing/invalid/expired")
 				# Complete the handshake just enough to send a clean close reason.
 				self._do_handshake(conn, key)
 				conn.sendall(encode_frame(OP_CLOSE, b"\x03\xe8unauthorized"))
 				conn.close()
 				return
 
+			self._log(f"authenticated as {user}; starting PTY shell")
 			self._do_handshake(conn, key)
 			self._bridge(conn)
+			self._log("session finished")
 		except Exception as e:  # noqa: BLE001
 			print(f"[fvs-pty] connection error: {e}", flush=True)
 			try:
