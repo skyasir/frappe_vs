@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.10"
 readme = "README.md"
-license = { file = "license.txt" }
+license = { file = "LICENSE" }
 dependencies = []
 
 [build-system]
