@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.DS_Store
+node_modules/
+
+# Self-hosted Monaco assets are downloaded on demand (see
+# frappe_vs/public/monaco/README.md) and are not committed.
+frappe_vs/public/monaco/vs/
