@@ -405,6 +405,41 @@
 	font-size: 12px;
 }
 
+.fvs-terminal-panel {
+	flex: 0 0 auto;
+	height: 240px;
+	display: flex;
+	flex-direction: column;
+	border-top: 2px solid var(--fvs-border);
+	background: var(--fvs-bg);
+}
+.fvs-terminal-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 3px 10px;
+	background: var(--fvs-panel);
+	border-bottom: 1px solid var(--fvs-border);
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--fvs-muted);
+}
+.fvs-terminal-cwd {
+	flex: 1 1 auto;
+	text-transform: none;
+	letter-spacing: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.fvs-terminal-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	padding: 4px 6px;
+	overflow: hidden;
+}
+
 .fvs-statusbar {
 	display: flex;
 	align-items: center;

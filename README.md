@@ -79,6 +79,23 @@ also the allow-list: any object type not listed is refused by every endpoint.
 `get_context` · `get_registry` · `list_records` · `get_source` · `save_source`
 · `create_object`
 
+## Mode A — integrated terminal (shipped)
+
+A real **interactive PTY** shell (vim/top/Ctrl-C all work), opened in the bench
+directory with the virtualenv on `PATH`. It is bridged to xterm.js by a small
+standalone server, [`frappe_vs/pty_server.py`](frappe_vs/pty_server.py)
+(stdlib WebSocket + `pty`, no extra deps).
+
+**Security model:**
+
+- The server binds **127.0.0.1 only** and is launched on demand by the
+  `terminal_start` endpoint (System-Manager + `developer_mode` gated).
+- Each WebSocket connection must present a **single-use token** (issued by that
+  endpoint, stored in redis with a 60s TTL, consumed on connect).
+- The shell is full access (RCE) **by design** — reachable only on localhost, in
+  `developer_mode`, by a System Manager. For an HTTPS Desk you'd front the
+  socket with `wss://`.
+
 ## Monaco loading
 
 Loaded through its AMD loader from a CDN (jsDelivr) with a **self-host fallback**
@@ -92,7 +109,8 @@ vendor Monaco locally (run `./fetch_monaco.sh`) for offline / air-gapped use.
 2. ✅ Mode B — safe object editor + “New” scaffolding (works on any site).
 3. ✅ Mode A file tree + read/edit/save/create/rename/delete, `developer_mode`-gated,
    path-confined to the bench root.
-4. ⏳ Integrated terminal (xterm.js over a websocket).
+4. ✅ Integrated terminal — real interactive PTY over a stdlib WebSocket server,
+   `developer_mode`-gated, 127.0.0.1-only, single-use token auth.
 5. ⏳ Git diff + find-in-files + remaining VS Code polish.
 
 ## License
