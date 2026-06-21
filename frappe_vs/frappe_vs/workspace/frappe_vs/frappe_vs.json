@@ -1,0 +1,63 @@
+{
+ "app": "frappe_vs",
+ "charts": [],
+ "content": "[{\"id\": \"fvs_header\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Frappe VS</b></span>\", \"col\": 12}}, {\"id\": \"fvs_shortcut\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Frappe VS\", \"col\": 4}}]",
+ "creation": "2026-06-22 01:00:52.514472",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "code",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Frappe VS",
+ "link_type": "DocType",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Editor",
+   "link_count": 1,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "",
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Open Frappe VS",
+   "link_count": 0,
+   "link_to": "frappe_vs",
+   "link_type": "Page",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-06-22 01:00:52.514472",
+ "modified_by": "Administrator",
+ "module": "Frappe VS",
+ "name": "Frappe VS",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ],
+ "sequence_id": 99.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Frappe VS",
+   "link_to": "frappe_vs",
+   "type": "Page"
+  }
+ ],
+ "title": "Frappe VS",
+ "type": "Workspace"
+}
