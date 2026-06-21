@@ -12,3 +12,16 @@ app_license = "mit"
 # app_include_js / app_include_css here. That keeps all of Frappe VS's CSS (the
 # .fvs-* rules) scoped to its own page and prevents it from leaking into the
 # rest of Desk.
+
+# Show Frappe VS on the Desk apps screen (v15/v16). Without this, the app's
+# workspace is tagged app="frappe_vs" but the launcher only renders workspaces
+# of registered apps, so it would never appear. Gated to System Managers.
+add_to_apps_screen = [
+	{
+		"name": "frappe_vs",
+		"logo": "/assets/frappe_vs/frappe_vs.svg",
+		"title": "Frappe VS",
+		"route": "/app/frappe_vs",
+		"has_permission": "frappe_vs.api.check_app_permission",
+	}
+]
