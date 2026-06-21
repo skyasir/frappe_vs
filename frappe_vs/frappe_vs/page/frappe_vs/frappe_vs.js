@@ -89,6 +89,40 @@ function fvs_boot_monaco(base, resolve, reject) {
 	}
 }
 
+// xterm.js (terminal) — pinned, loaded from CDN with a self-host fallback.
+const FVS_XTERM_VERSION = "5.3.0";
+const FVS_XTERM_FIT_VERSION = "0.8.0";
+const FVS_XTERM_CDN = `https://cdn.jsdelivr.net/npm/xterm@${FVS_XTERM_VERSION}`;
+const FVS_XTERM_FIT_CDN = `https://cdn.jsdelivr.net/npm/xterm-addon-fit@${FVS_XTERM_FIT_VERSION}/lib/xterm-addon-fit.js`;
+const FVS_XTERM_LOCAL = "/assets/frappe_vs/xterm";
+
+function fvs_load_xterm() {
+	if (window.__fvs_xterm) return Promise.resolve(window.__fvs_xterm);
+	if (window.__fvs_xterm_promise) return window.__fvs_xterm_promise;
+
+	window.__fvs_xterm_promise = (async () => {
+		const css = document.createElement("link");
+		css.rel = "stylesheet";
+		css.href = `${FVS_XTERM_CDN}/css/xterm.css`;
+		css.onerror = () => {
+			css.href = `${FVS_XTERM_LOCAL}/xterm.css`;
+		};
+		document.head.appendChild(css);
+
+		const load = (cdn, local) =>
+			fvs_inject_script(cdn).catch(() => fvs_inject_script(local));
+		await load(`${FVS_XTERM_CDN}/lib/xterm.js`, `${FVS_XTERM_LOCAL}/xterm.js`);
+		await load(FVS_XTERM_FIT_CDN, `${FVS_XTERM_LOCAL}/xterm-addon-fit.js`);
+
+		window.__fvs_xterm = {
+			Terminal: window.Terminal,
+			FitAddon: window.FitAddon && window.FitAddon.FitAddon,
+		};
+		return window.__fvs_xterm;
+	})();
+	return window.__fvs_xterm_promise;
+}
+
 /* ------------------------------------------------------------------ *
  * Workbench
  * ------------------------------------------------------------------ */
@@ -151,6 +185,14 @@ frappe.frappe_vs.Workbench = class Workbench {
 							</div>
 						</div>
 					</div>
+					<div class="fvs-terminal-panel" style="display:none">
+						<div class="fvs-terminal-head">
+							<span class="fvs-terminal-title">${__("Terminal")}</span>
+							<span class="fvs-terminal-cwd"></span>
+							<button class="fvs-icon-btn fvs-terminal-close" title="${__("Close terminal")}">✕</button>
+						</div>
+						<div class="fvs-terminal-body"></div>
+					</div>
 					<div class="fvs-statusbar">
 						<span class="fvs-status-left"></span>
 						<span class="fvs-status-right"></span>
@@ -166,9 +208,12 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.$tabbar = this.$root.find(".fvs-tabbar");
 		this.$editor = this.$root.find(".fvs-editor");
 		this.$welcome = this.$root.find(".fvs-welcome");
+		this.$terminal_panel = this.$root.find(".fvs-terminal-panel");
+		this.$terminal_body = this.$root.find(".fvs-terminal-body");
 		this.$status_left = this.$root.find(".fvs-status-left");
 		this.$status_right = this.$root.find(".fvs-status-right");
 
+		this.$root.find(".fvs-terminal-close").on("click", () => this.toggle_terminal(false));
 		this.$root.find(".fvs-refresh").on("click", () => this.reload_explorer());
 		this.$root.find(".fvs-new").on("click", () => this.on_new_click());
 		this.$root.find(".fvs-search-input").on("input", (e) =>
@@ -211,6 +256,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 		const h = Math.max(360, window.innerHeight - top - 12);
 		this.$root.css("height", h + "px");
 		this.editor && this.editor.layout();
+		this.fit_terminal && this.fit_terminal();
 	}
 
 	on_show() {
@@ -234,6 +280,9 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.render_banner();
 		this.render_explorer_header();
 		this.render_explorer();
+		if (this.developer_mode) {
+			this.page.add_inner_button(__("Terminal"), () => this.toggle_terminal());
+		}
 		try {
 			await this.init_editor();
 		} catch (e) {
@@ -983,6 +1032,115 @@ frappe.frappe_vs.Workbench = class Workbench {
 			});
 		// On validation/permission failure frappe.call surfaces the message and
 		// the file stays dirty, so nothing is silently lost.
+	}
+
+	/* --------------------- Terminal (Mode A · PTY) ---------------------- */
+
+	toggle_terminal(show) {
+		const visible = this.$terminal_panel.is(":visible");
+		const next = show === undefined ? !visible : show;
+		if (next) {
+			this.$terminal_panel.css("display", "");
+			this.resize();
+			this.open_terminal();
+		} else {
+			this.$terminal_panel.css("display", "none");
+			this.close_terminal();
+			this.resize();
+		}
+	}
+
+	async open_terminal() {
+		if (this.term) {
+			this.fit_terminal();
+			this.term.focus();
+			return;
+		}
+		let xt;
+		try {
+			xt = await fvs_load_xterm();
+		} catch (e) {
+			frappe.msgprint(__("Could not load xterm.js (terminal)."));
+			return;
+		}
+		this.term = new xt.Terminal({
+			cursorBlink: true,
+			fontSize: 13,
+			fontFamily: "var(--font-stack-monospace, monospace)",
+			theme: this.theme === "vs-dark" ? { background: "#1e1e1e" } : { background: "#ffffff", foreground: "#1f1f1f", cursor: "#1f1f1f" },
+		});
+		this.fit_addon = xt.FitAddon ? new xt.FitAddon() : null;
+		if (this.fit_addon) this.term.loadAddon(this.fit_addon);
+		this.term.open(this.$terminal_body.get(0));
+		this.fit_terminal();
+		this.term.writeln("\x1b[90mConnecting to the bench shell…\x1b[0m");
+		this.connect_terminal();
+	}
+
+	connect_terminal() {
+		frappe
+			.xcall("frappe_vs.api.terminal_start")
+			.then((info) => {
+				const url = `ws://${info.host}:${info.port}/?token=${encodeURIComponent(info.token)}`;
+				const ws = new WebSocket(url);
+				ws.binaryType = "arraybuffer";
+				this.ws = ws;
+				const enc = new TextEncoder();
+
+				ws.onopen = () => {
+					this.send_resize();
+					this._on_data = this.term.onData((d) => {
+						if (ws.readyState === 1) ws.send(enc.encode(d));
+					});
+					this._on_resize = this.term.onResize(() => this.send_resize());
+					this.term.focus();
+				};
+				ws.onmessage = (ev) => {
+					this.term.write(new Uint8Array(ev.data));
+				};
+				ws.onclose = () => {
+					this.term && this.term.writeln("\r\n\x1b[90m[session closed]\x1b[0m");
+				};
+				ws.onerror = () => {
+					this.term && this.term.writeln("\r\n\x1b[31m[connection error]\x1b[0m");
+				};
+			})
+			.catch(() => {
+				this.term && this.term.writeln("\r\n\x1b[31m[could not start terminal server]\x1b[0m");
+			});
+	}
+
+	send_resize() {
+		if (this.ws && this.ws.readyState === 1 && this.term) {
+			this.ws.send(JSON.stringify({ resize: [this.term.cols, this.term.rows] }));
+		}
+	}
+
+	fit_terminal() {
+		try {
+			this.fit_addon && this.fit_addon.fit();
+		} catch (e) {
+			/* panel not laid out yet */
+		}
+	}
+
+	close_terminal() {
+		if (this._on_data) this._on_data.dispose();
+		if (this._on_resize) this._on_resize.dispose();
+		this._on_data = this._on_resize = null;
+		if (this.ws) {
+			try {
+				this.ws.close();
+			} catch (e) {
+				/* noop */
+			}
+			this.ws = null;
+		}
+		if (this.term) {
+			this.term.dispose();
+			this.term = null;
+			this.fit_addon = null;
+		}
 	}
 
 	/* ------------------------------ Theme ------------------------------- */

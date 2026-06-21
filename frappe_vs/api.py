@@ -20,6 +20,10 @@ Security rules enforced here (not assumed from the client):
 from __future__ import annotations
 
 import os
+import secrets
+import socket as _socket
+import subprocess
+import time
 
 import frappe
 from frappe import _
@@ -127,6 +131,7 @@ def get_context() -> dict:
 			"default_root": "apps",
 			"editable_extensions": sorted(EDITABLE_EXTS),
 		}
+		out["terminal"] = {"enabled": True, "cwd": _bench_root()}
 	return out
 
 
@@ -536,3 +541,82 @@ def fs_delete(path: str) -> dict:
 			frappe.throw(_("Refusing to delete a protected file."), frappe.PermissionError)
 		os.remove(abspath)
 	return {"path": _rel(abspath), "deleted": True}
+
+
+# =========================================================================== #
+# Mode A — interactive terminal (developer_mode ONLY)
+#
+# A real PTY shell is bridged to xterm.js by the standalone
+# `frappe_vs.pty_server` (stdlib WebSocket + PTY). This endpoint is the only
+# control surface: it is developer_mode + System-Manager gated, ensures the
+# server is up (bound to 127.0.0.1), and hands the client a single-use,
+# short-lived token to authenticate the WebSocket. The shell is full access by
+# design — reachable only on localhost, in developer_mode, by a System Manager.
+# =========================================================================== #
+TERMINAL_DEFAULT_PORT = 7900
+
+
+def _terminal_redis():
+	import redis  # bundled with frappe
+
+	return redis.from_url(frappe.conf.redis_cache)
+
+
+def _terminal_port() -> int:
+	return int(frappe.conf.get("frappe_vs_terminal_port") or TERMINAL_DEFAULT_PORT)
+
+
+def _pty_server_running(host: str, port: int) -> bool:
+	try:
+		with _socket.create_connection((host, port), timeout=0.5):
+			return True
+	except OSError:
+		return False
+
+
+def _ensure_pty_server(host: str, port: int) -> None:
+	if _pty_server_running(host, port):
+		return
+	python = os.path.join(_bench_root(), "env", "bin", "python")
+	logdir = os.path.join(_bench_root(), "logs")
+	log = (
+		open(os.path.join(logdir, "frappe_vs_pty.log"), "a")
+		if os.path.isdir(logdir)
+		else subprocess.DEVNULL
+	)
+	subprocess.Popen(
+		[
+			python,
+			"-m",
+			"frappe_vs.pty_server",
+			"--bench-root",
+			_bench_root(),
+			"--redis-url",
+			frappe.conf.redis_cache,
+			"--host",
+			host,
+			"--port",
+			str(port),
+		],
+		stdout=log,
+		stderr=log,
+		start_new_session=True,
+		close_fds=True,
+	)
+	for _ in range(50):
+		if _pty_server_running(host, port):
+			return
+		time.sleep(0.1)
+	frappe.throw(_("Could not start the terminal server."))
+
+
+@frappe.whitelist()
+def terminal_start() -> dict:
+	"""Ensure the PTY server is up and return a single-use connection token."""
+	_fs_guard()  # developer_mode + System Manager
+	host = "127.0.0.1"
+	port = _terminal_port()
+	_ensure_pty_server(host, port)
+	token = secrets.token_urlsafe(24)
+	_terminal_redis().set(f"fvs_term_token:{token}", frappe.session.user, ex=60)
+	return {"host": host, "port": port, "token": token}
