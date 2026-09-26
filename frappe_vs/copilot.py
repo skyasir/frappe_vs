@@ -65,8 +65,8 @@ def add_field(
 	meta = frappe.get_meta(doctype)
 	if meta.get_field(fieldname):
 		frappe.throw(_("{0} already has a field called {1}.").format(doctype, fieldname))
-	if insert_after and not meta.get_field(insert_after):
-		frappe.throw(_("{0} has no field called {1} to put it after.").format(doctype, insert_after))
+	if insert_after:
+		insert_after = _resolve(meta, insert_after)
 
 	return {
 		"action": "Create",
@@ -90,8 +90,8 @@ def add_field(
 def set_property(doctype: str, fieldname: str, prop: str, value, property_type: str = "Data") -> dict:
 	"""Change one thing about an existing field: its label, whether it is required, hidden."""
 	meta = frappe.get_meta(doctype)
-	if fieldname and not meta.get_field(fieldname):
-		frappe.throw(_("{0} has no field called {1}.").format(doctype, fieldname))
+	if fieldname:
+		fieldname = _resolve(meta, fieldname)
 
 	name = f"{doctype}-{fieldname}-{prop}"
 	payload = {
@@ -146,6 +146,21 @@ def create_report(title: str, ref_doctype: str, query: str, is_standard: str = "
 			}
 		),
 	}
+
+
+def _resolve(meta, field: str) -> str:
+	"""Take a fieldname, or the label someone reads on the form."""
+	if meta.get_field(field):
+		return field
+	folded = field.strip().lower()
+	for df in meta.fields:
+		if (df.label or "").strip().lower() == folded:
+			return df.fieldname
+	frappe.throw(
+		_("{0} has no field called {1}. Use the fieldname, for example item_name.").format(
+			meta.name, field
+		)
+	)
 
 
 def _last_field(meta) -> str | None:

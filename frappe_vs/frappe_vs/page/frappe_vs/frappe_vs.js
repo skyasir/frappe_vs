@@ -211,6 +211,19 @@ frappe.frappe_vs.Workbench = class Workbench {
 						<span class="fvs-status-right"></span>
 					</div>
 				</div>
+				<div class="fvs-copilot" style="display:none">
+					<div class="fvs-copilot-head">
+						<span class="fvs-copilot-title">${__("Copilot")}</span>
+						<span class="fvs-copilot-model"></span>
+						<button class="fvs-icon-btn fvs-copilot-close" title="${__("Close")}">✕</button>
+					</div>
+					<div class="fvs-copilot-log"></div>
+					<div class="fvs-copilot-composer">
+						<textarea class="fvs-copilot-input" rows="2" spellcheck="false"
+							placeholder="${__("Add a PO Number field to Sales Order…")}"></textarea>
+						<button class="fvs-btn fvs-copilot-send">${__("Send")}</button>
+					</div>
+				</div>
 			</div>
 		`).appendTo(this.page.main);
 
@@ -225,6 +238,21 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.$terminal_body = this.$root.find(".fvs-terminal-body");
 		this.$status_left = this.$root.find(".fvs-status-left");
 		this.$status_right = this.$root.find(".fvs-status-right");
+
+		this.$copilot = this.$root.find(".fvs-copilot");
+		this.$copilot_log = this.$root.find(".fvs-copilot-log");
+		this.$copilot_input = this.$root.find(".fvs-copilot-input");
+		this.copilot_history = [];
+
+		this.$root.find(".fvs-copilot-close").on("click", () => this.toggle_copilot(false));
+		this.$root.find(".fvs-copilot-send").on("click", () => this.copilot_send());
+		this.$copilot_input.on("keydown", (e) => {
+			// Enter sends; Shift+Enter is a new line, as everywhere else.
+			if (e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				this.copilot_send();
+			}
+		});
 
 		this.$root.find(".fvs-terminal-close").on("click", () => this.toggle_terminal(false));
 		this.$root.find(".fvs-refresh").on("click", () => this.reload_explorer());
@@ -250,6 +278,117 @@ frappe.frappe_vs.Workbench = class Workbench {
 			this.toggle_theme()
 		);
 		this.page.add_inner_button(__("Reload"), () => this.reload_explorer());
+		this.page.add_inner_button(__("Copilot"), () => this.toggle_copilot());
+	}
+
+	/* -------------------------------------------------------------- *
+	 * Copilot: say what you want changed, review it, apply or undo.
+	 * -------------------------------------------------------------- */
+	async toggle_copilot(show) {
+		const open = show === undefined ? this.$copilot.is(":hidden") : show;
+		this.$copilot.toggle(open);
+		this.resize();
+		if (!open) return;
+		this.$copilot_input.trigger("focus");
+		if (this.copilot_ready) return;
+
+		this.copilot_ready = true;
+		try {
+			const status = await frappe.xcall("frappe_vs.copilot_chat.status");
+			this.$root.find(".fvs-copilot-model").text(status.on ? status.model : "");
+			if (!status.on) {
+				this.copilot_say(
+					"system",
+					__("No AI is configured on this bench yet. Set ai_model and ai_base_url in site config.")
+				);
+			} else {
+				this.copilot_say(
+					"system",
+					__("Tell me what to change. I propose it first — nothing changes until you press Apply.")
+				);
+			}
+		} catch (e) {
+			this.copilot_say("system", e.message || __("Could not reach the copilot."));
+		}
+	}
+
+	copilot_say(role, text) {
+		const $row = $(`<div class="fvs-copilot-msg fvs-copilot-${role}"></div>`).text(text);
+		this.$copilot_log.append($row);
+		this.$copilot_log.scrollTop(this.$copilot_log[0].scrollHeight);
+		return $row;
+	}
+
+	async copilot_send() {
+		const message = (this.$copilot_input.val() || "").trim();
+		if (!message || this.copilot_busy) return;
+		this.copilot_busy = true;
+		this.$copilot_input.val("");
+		this.copilot_say("user", message);
+		const $thinking = this.copilot_say("system", __("Thinking…"));
+
+		try {
+			const result = await frappe.xcall("frappe_vs.copilot_chat.chat", {
+				message,
+				history: JSON.stringify(this.copilot_history.slice(-8)),
+			});
+			$thinking.remove();
+			if (result.reply) this.copilot_say("bot", result.reply);
+			this.copilot_history.push({ role: "user", content: message });
+			if (result.reply) this.copilot_history.push({ role: "assistant", content: result.reply });
+			if (result.change_set) this.copilot_render_change_set(result.change_set);
+		} catch (e) {
+			$thinking.remove();
+			this.copilot_say("system", e.message || __("That did not work."));
+		} finally {
+			this.copilot_busy = false;
+		}
+	}
+
+	copilot_render_change_set(cs) {
+		const $card = $(`
+			<div class="fvs-changeset" data-name="${frappe.utils.escape_html(cs.name)}">
+				<div class="fvs-changeset-head">
+					<span class="fvs-changeset-title"></span>
+					<span class="fvs-changeset-status"></span>
+				</div>
+				<ul class="fvs-changeset-list"></ul>
+				<div class="fvs-changeset-actions">
+					<button class="fvs-btn fvs-changeset-apply">${__("Apply")}</button>
+					<button class="fvs-btn fvs-changeset-undo" style="display:none">${__("Undo")}</button>
+				</div>
+			</div>
+		`);
+		$card.find(".fvs-changeset-title").text(cs.title);
+		$card.find(".fvs-changeset-status").text(cs.status);
+		(cs.changes || []).forEach((c) => {
+			$("<li></li>").text(c.summary || `${c.action} ${c.doctype}`).appendTo($card.find(".fvs-changeset-list"));
+		});
+
+		const run = async (method, $btn) => {
+			$btn.prop("disabled", true);
+			try {
+				const out = await frappe.xcall(`frappe_vs.copilot.${method}`, { name: cs.name });
+				$card.find(".fvs-changeset-status").text(out.status);
+				$card.find(".fvs-changeset-apply").toggle(out.status !== "Applied");
+				$card.find(".fvs-changeset-undo").toggle(out.status === "Applied");
+				frappe.show_alert({
+					message: out.status === "Applied" ? __("Applied") : __("Undone"),
+					indicator: "green",
+				});
+				// A changed form is a changed site: the editor's data may be stale.
+				frappe.clear_cache();
+			} catch (e) {
+				this.copilot_say("system", e.message || __("That did not work."));
+			} finally {
+				$btn.prop("disabled", false);
+			}
+		};
+		$card.find(".fvs-changeset-apply").on("click", (e) => run("apply", $(e.currentTarget)));
+		$card.find(".fvs-changeset-undo").on("click", (e) => run("undo", $(e.currentTarget)));
+
+		this.$copilot_log.append($card);
+		this.$copilot_log.scrollTop(this.$copilot_log[0].scrollHeight);
 	}
 
 	bind_global_keys() {
