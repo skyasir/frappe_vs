@@ -79,22 +79,37 @@ also the allow-list: any object type not listed is refused by every endpoint.
 `get_context` · `get_registry` · `list_records` · `get_source` · `save_source`
 · `create_object`
 
-## Mode A — integrated terminal (shipped)
+## Copilot
 
-A real **interactive PTY** shell (vim/top/Ctrl-C all work), opened in the bench
-directory with the virtualenv on `PATH`. It is bridged to xterm.js by a small
-standalone server, [`frappe_vs/pty_server.py`](frappe_vs/pty_server.py)
-(stdlib WebSocket + `pty`, no extra deps).
+Say what you want changed — *"add a Delivery Instructions field to Sales Order
+after customer"* — and the copilot composes it, writes it down as a **VS Change
+Set**, and shows it beside the editor with an **Apply** button. Nothing reaches
+the site until that is pressed, and **Undo** sits next to it afterwards.
 
-**Security model:**
+- It changes **customisations only**: custom fields, form properties, scripts,
+  reports, workflows, notifications, print formats. Never invoices, stock,
+  customers or users.
+- Every change stores how the record looked beforehand, so undo restores that
+  rather than guessing. Writing a Custom Field commits, so a half-applied set
+  is rolled back change by change from those snapshots.
+- The builders validate before anything is written, and a refusal goes back to
+  the model in words so it can correct itself.
 
-- The server binds **127.0.0.1 only** and is launched on demand by the
-  `terminal_start` endpoint (System-Manager + `developer_mode` gated).
-- Each WebSocket connection must present a **single-use token** (issued by that
-  endpoint, stored in redis with a 60s TTL, consumed on connect).
-- The shell is full access (RCE) **by design** — reachable only on localhost, in
-  `developer_mode`, by a System Manager. For an HTTPS Desk you'd front the
-  socket with `wss://`.
+The provider is read from the bench's site config, so one setting serves every
+app on the bench:
+
+```json
+{
+  "ai_provider": "OpenAI compatible",
+  "ai_base_url": "http://localhost:11434/v1",
+  "ai_model": "llama3.2:3b",
+  "ai_api_key": ""
+}
+```
+
+`"OpenAI compatible"` covers OpenAI, Ollama, vLLM and anything else serving
+`/chat/completions`; `"Anthropic"` is spoken natively. With no model set, the
+panel says so and the rest of the editor is unaffected.
 
 ## Monaco loading
 
@@ -109,8 +124,7 @@ vendor Monaco locally (run `./fetch_monaco.sh`) for offline / air-gapped use.
 2. ✅ Mode B — safe object editor + “New” scaffolding (works on any site).
 3. ✅ Mode A file tree + read/edit/save/create/rename/delete, `developer_mode`-gated,
    path-confined to the bench root.
-4. ✅ Integrated terminal — real interactive PTY over a stdlib WebSocket server,
-   `developer_mode`-gated, 127.0.0.1-only, single-use token auth.
+4. ✅ Copilot — say what to change, review the change set, apply or undo it.
 5. ⏳ Git diff + find-in-files + remaining VS Code polish.
 
 ## License
