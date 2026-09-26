@@ -89,6 +89,53 @@ function fvs_boot_monaco(base, resolve, reject) {
 	}
 }
 
+// xterm.js (terminal) — pinned, loaded from CDN with a self-host fallback.
+const FVS_XTERM_VERSION = "5.3.0";
+const FVS_XTERM_FIT_VERSION = "0.8.0";
+const FVS_XTERM_CDN = `https://cdn.jsdelivr.net/npm/xterm@${FVS_XTERM_VERSION}`;
+const FVS_XTERM_FIT_CDN = `https://cdn.jsdelivr.net/npm/xterm-addon-fit@${FVS_XTERM_FIT_VERSION}/lib/xterm-addon-fit.js`;
+const FVS_XTERM_LOCAL = "/assets/frappe_vs/xterm";
+
+function fvs_load_xterm() {
+	if (window.__fvs_xterm) return Promise.resolve(window.__fvs_xterm);
+	if (window.__fvs_xterm_promise) return window.__fvs_xterm_promise;
+
+	window.__fvs_xterm_promise = (async () => {
+		const css = document.createElement("link");
+		css.rel = "stylesheet";
+		css.href = `${FVS_XTERM_LOCAL}/xterm.css`;
+		css.onerror = () => {
+			css.href = `${FVS_XTERM_CDN}/css/xterm.css`;
+		};
+		document.head.appendChild(css);
+
+		// xterm ships as a UMD bundle: if a global AMD `define` exists it registers
+		// via AMD and never assigns window.Terminal. Monaco's AMD loader sets exactly
+		// such a `define`, so we stash and disable it while loading xterm, forcing
+		// the bundle to attach Terminal / FitAddon to window.*.
+		const load = (primary, fallback) =>
+			fvs_inject_script(primary).catch(() => fvs_inject_script(fallback));
+		const saved_define = window.define;
+		window.define = undefined;
+		try {
+			await load(`${FVS_XTERM_LOCAL}/xterm.js`, `${FVS_XTERM_CDN}/lib/xterm.js`);
+			await load(`${FVS_XTERM_LOCAL}/xterm-addon-fit.js`, FVS_XTERM_FIT_CDN);
+		} finally {
+			window.define = saved_define;
+		}
+
+		window.__fvs_xterm = {
+			Terminal: window.Terminal,
+			FitAddon: window.FitAddon && window.FitAddon.FitAddon,
+		};
+		if (!window.__fvs_xterm.Terminal) {
+			throw new Error("xterm loaded but window.Terminal is undefined");
+		}
+		return window.__fvs_xterm;
+	})();
+	return window.__fvs_xterm_promise;
+}
+
 /* ------------------------------------------------------------------ *
  * Workbench
  * ------------------------------------------------------------------ */
@@ -151,22 +198,17 @@ frappe.frappe_vs.Workbench = class Workbench {
 							</div>
 						</div>
 					</div>
+					<div class="fvs-terminal-panel" style="display:none">
+						<div class="fvs-terminal-head">
+							<span class="fvs-terminal-title">${__("Terminal")}</span>
+							<span class="fvs-terminal-cwd"></span>
+							<button class="fvs-icon-btn fvs-terminal-close" title="${__("Close terminal")}">✕</button>
+						</div>
+						<div class="fvs-terminal-body"></div>
+					</div>
 					<div class="fvs-statusbar">
 						<span class="fvs-status-left"></span>
 						<span class="fvs-status-right"></span>
-					</div>
-				</div>
-				<div class="fvs-copilot" style="display:none">
-					<div class="fvs-copilot-head">
-						<span class="fvs-copilot-title">${__("Copilot")}</span>
-						<span class="fvs-copilot-model"></span>
-						<button class="fvs-icon-btn fvs-copilot-close" title="${__("Close")}">✕</button>
-					</div>
-					<div class="fvs-copilot-log"></div>
-					<div class="fvs-copilot-composer">
-						<textarea class="fvs-copilot-input" rows="2" spellcheck="false"
-							placeholder="${__("Add a PO Number field to Sales Order…")}"></textarea>
-						<button class="fvs-btn fvs-copilot-send">${__("Send")}</button>
 					</div>
 				</div>
 			</div>
@@ -179,24 +221,12 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.$tabbar = this.$root.find(".fvs-tabbar");
 		this.$editor = this.$root.find(".fvs-editor");
 		this.$welcome = this.$root.find(".fvs-welcome");
+		this.$terminal_panel = this.$root.find(".fvs-terminal-panel");
+		this.$terminal_body = this.$root.find(".fvs-terminal-body");
 		this.$status_left = this.$root.find(".fvs-status-left");
 		this.$status_right = this.$root.find(".fvs-status-right");
 
-		this.$copilot = this.$root.find(".fvs-copilot");
-		this.$copilot_log = this.$root.find(".fvs-copilot-log");
-		this.$copilot_input = this.$root.find(".fvs-copilot-input");
-		this.copilot_history = [];
-
-		this.$root.find(".fvs-copilot-close").on("click", () => this.toggle_copilot(false));
-		this.$root.find(".fvs-copilot-send").on("click", () => this.copilot_send());
-		this.$copilot_input.on("keydown", (e) => {
-			// Enter sends; Shift+Enter is a new line, as everywhere else.
-			if (e.key === "Enter" && !e.shiftKey) {
-				e.preventDefault();
-				this.copilot_send();
-			}
-		});
-
+		this.$root.find(".fvs-terminal-close").on("click", () => this.toggle_terminal(false));
 		this.$root.find(".fvs-refresh").on("click", () => this.reload_explorer());
 		this.$root.find(".fvs-new").on("click", () => this.on_new_click());
 		this.$root.find(".fvs-search-input").on("input", (e) =>
@@ -220,117 +250,6 @@ frappe.frappe_vs.Workbench = class Workbench {
 			this.toggle_theme()
 		);
 		this.page.add_inner_button(__("Reload"), () => this.reload_explorer());
-		this.page.add_inner_button(__("Copilot"), () => this.toggle_copilot());
-	}
-
-	/* -------------------------------------------------------------- *
-	 * Copilot: say what you want changed, review it, apply or undo.
-	 * -------------------------------------------------------------- */
-	async toggle_copilot(show) {
-		const open = show === undefined ? this.$copilot.is(":hidden") : show;
-		this.$copilot.toggle(open);
-		this.resize();
-		if (!open) return;
-		this.$copilot_input.trigger("focus");
-		if (this.copilot_ready) return;
-
-		this.copilot_ready = true;
-		try {
-			const status = await frappe.xcall("frappe_vs.copilot_chat.status");
-			this.$root.find(".fvs-copilot-model").text(status.on ? status.model : "");
-			if (!status.on) {
-				this.copilot_say(
-					"system",
-					__("No AI is configured on this bench yet. Set ai_model and ai_base_url in site config.")
-				);
-			} else {
-				this.copilot_say(
-					"system",
-					__("Tell me what to change. I propose it first — nothing changes until you press Apply.")
-				);
-			}
-		} catch (e) {
-			this.copilot_say("system", e.message || __("Could not reach the copilot."));
-		}
-	}
-
-	copilot_say(role, text) {
-		const $row = $(`<div class="fvs-copilot-msg fvs-copilot-${role}"></div>`).text(text);
-		this.$copilot_log.append($row);
-		this.$copilot_log.scrollTop(this.$copilot_log[0].scrollHeight);
-		return $row;
-	}
-
-	async copilot_send() {
-		const message = (this.$copilot_input.val() || "").trim();
-		if (!message || this.copilot_busy) return;
-		this.copilot_busy = true;
-		this.$copilot_input.val("");
-		this.copilot_say("user", message);
-		const $thinking = this.copilot_say("system", __("Thinking…"));
-
-		try {
-			const result = await frappe.xcall("frappe_vs.copilot_chat.chat", {
-				message,
-				history: JSON.stringify(this.copilot_history.slice(-8)),
-			});
-			$thinking.remove();
-			if (result.reply) this.copilot_say("bot", result.reply);
-			this.copilot_history.push({ role: "user", content: message });
-			if (result.reply) this.copilot_history.push({ role: "assistant", content: result.reply });
-			if (result.change_set) this.copilot_render_change_set(result.change_set);
-		} catch (e) {
-			$thinking.remove();
-			this.copilot_say("system", e.message || __("That did not work."));
-		} finally {
-			this.copilot_busy = false;
-		}
-	}
-
-	copilot_render_change_set(cs) {
-		const $card = $(`
-			<div class="fvs-changeset" data-name="${frappe.utils.escape_html(cs.name)}">
-				<div class="fvs-changeset-head">
-					<span class="fvs-changeset-title"></span>
-					<span class="fvs-changeset-status"></span>
-				</div>
-				<ul class="fvs-changeset-list"></ul>
-				<div class="fvs-changeset-actions">
-					<button class="fvs-btn fvs-changeset-apply">${__("Apply")}</button>
-					<button class="fvs-btn fvs-changeset-undo" style="display:none">${__("Undo")}</button>
-				</div>
-			</div>
-		`);
-		$card.find(".fvs-changeset-title").text(cs.title);
-		$card.find(".fvs-changeset-status").text(cs.status);
-		(cs.changes || []).forEach((c) => {
-			$("<li></li>").text(c.summary || `${c.action} ${c.doctype}`).appendTo($card.find(".fvs-changeset-list"));
-		});
-
-		const run = async (method, $btn) => {
-			$btn.prop("disabled", true);
-			try {
-				const out = await frappe.xcall(`frappe_vs.copilot.${method}`, { name: cs.name });
-				$card.find(".fvs-changeset-status").text(out.status);
-				$card.find(".fvs-changeset-apply").toggle(out.status !== "Applied");
-				$card.find(".fvs-changeset-undo").toggle(out.status === "Applied");
-				frappe.show_alert({
-					message: out.status === "Applied" ? __("Applied") : __("Undone"),
-					indicator: "green",
-				});
-				// A changed form is a changed site: the editor's data may be stale.
-				frappe.clear_cache();
-			} catch (e) {
-				this.copilot_say("system", e.message || __("That did not work."));
-			} finally {
-				$btn.prop("disabled", false);
-			}
-		};
-		$card.find(".fvs-changeset-apply").on("click", (e) => run("apply", $(e.currentTarget)));
-		$card.find(".fvs-changeset-undo").on("click", (e) => run("undo", $(e.currentTarget)));
-
-		this.$copilot_log.append($card);
-		this.$copilot_log.scrollTop(this.$copilot_log[0].scrollHeight);
 	}
 
 	bind_global_keys() {
@@ -350,6 +269,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 		const h = Math.max(360, window.innerHeight - top - 12);
 		this.$root.css("height", h + "px");
 		this.editor && this.editor.layout();
+		this.fit_terminal && this.fit_terminal();
 	}
 
 	on_show() {
@@ -374,6 +294,7 @@ frappe.frappe_vs.Workbench = class Workbench {
 		this.render_explorer_header();
 		this.render_explorer();
 		if (this.developer_mode) {
+			this.page.add_inner_button(__("Terminal"), () => this.toggle_terminal());
 		}
 		try {
 			await this.init_editor();
@@ -1124,6 +1045,155 @@ frappe.frappe_vs.Workbench = class Workbench {
 			});
 		// On validation/permission failure frappe.call surfaces the message and
 		// the file stays dirty, so nothing is silently lost.
+	}
+
+	/* --------------------- Terminal (Mode A · PTY) ---------------------- */
+
+	toggle_terminal(show) {
+		const visible = this.$terminal_panel.is(":visible");
+		const next = show === undefined ? !visible : show;
+		if (next) {
+			this.$terminal_panel.css("display", "");
+			this.resize();
+			this.open_terminal();
+		} else {
+			this.$terminal_panel.css("display", "none");
+			this.close_terminal();
+			this.resize();
+		}
+	}
+
+	async open_terminal() {
+		if (this.term) {
+			this.fit_terminal();
+			this.term.focus();
+			return;
+		}
+		let xt;
+		try {
+			xt = await fvs_load_xterm();
+		} catch (e) {
+			frappe.msgprint(__("Could not load xterm.js (terminal)."));
+			return;
+		}
+		this.term = new xt.Terminal({
+			cursorBlink: true,
+			fontSize: 13,
+			fontFamily: "var(--font-stack-monospace, monospace)",
+			theme: this.theme === "vs-dark" ? { background: "#1e1e1e" } : { background: "#ffffff", foreground: "#1f1f1f", cursor: "#1f1f1f" },
+		});
+		this.fit_addon = xt.FitAddon ? new xt.FitAddon() : null;
+		if (this.fit_addon) this.term.loadAddon(this.fit_addon);
+		this.term.open(this.$terminal_body.get(0));
+		// Fit once layout settles (the panel may not have its height yet).
+		this.fit_terminal();
+		requestAnimationFrame(() => this.fit_terminal());
+		setTimeout(() => this.fit_terminal(), 60);
+		this.term.focus();
+		this.connect_terminal();
+	}
+
+	term_log(text, color) {
+		const codes = { cyan: 36, green: 32, red: 31, yellow: 33, grey: 90 };
+		this.term && this.term.writeln(`\x1b[${codes[color] || 0}m${text}\x1b[0m`);
+	}
+
+	connect_terminal() {
+		this.term_log("Starting bench shell…", "cyan");
+		frappe
+			.xcall("frappe_vs.api.terminal_start")
+			.then((info) => {
+				// Use the host the page is served from (it resolves to the same
+				// loopback the server binds to) rather than a hardcoded IP.
+				const host = window.location.hostname || info.host;
+				const url = `ws://${host}:${info.port}/?token=${encodeURIComponent(info.token)}`;
+				this.term_log(`Connecting to ${host}:${info.port} …`, "cyan");
+				const ws = new WebSocket(url);
+				ws.binaryType = "arraybuffer";
+				this.ws = ws;
+				const enc = new TextEncoder();
+				let opened = false;
+
+				this._ws_timer = setTimeout(() => {
+					if (!opened) {
+						this.term_log(
+							`Still connecting… check that nothing blocks port ${info.port} on ${host}. ` +
+								`Open DevTools → Console / Network (WS) for the exact reason.`,
+							"yellow"
+						);
+					}
+				}, 5000);
+
+				ws.onopen = () => {
+					opened = true;
+					clearTimeout(this._ws_timer);
+					this.term_log("Connected.\r", "green");
+					this.send_resize();
+					this._on_data = this.term.onData((d) => {
+						if (ws.readyState === 1) ws.send(enc.encode(d));
+					});
+					this._on_resize = this.term.onResize(() => this.send_resize());
+					this.term.focus();
+				};
+				ws.onmessage = (ev) => {
+					this.term.write(new Uint8Array(ev.data));
+				};
+				ws.onclose = (e) => {
+					clearTimeout(this._ws_timer);
+					if (!opened) {
+						this.term_log(
+							`Could not open the WebSocket (closed, code ${e.code}). The PTY server listens on ` +
+								`127.0.0.1, so this only works when your browser is on the same machine as the bench.`,
+							"red"
+						);
+					} else {
+						this.term_log("\n[session ended]", "grey");
+					}
+				};
+				ws.onerror = () => {
+					this.term_log(`WebSocket error reaching ${host}:${info.port}.`, "red");
+				};
+			})
+			.catch((e) => {
+				this.term_log(
+					"Could not start the terminal server: " + ((e && e.message) || "see Error Log"),
+					"red"
+				);
+			});
+	}
+
+	send_resize() {
+		if (this.ws && this.ws.readyState === 1 && this.term) {
+			this.ws.send(JSON.stringify({ resize: [this.term.cols, this.term.rows] }));
+		}
+	}
+
+	fit_terminal() {
+		try {
+			this.fit_addon && this.fit_addon.fit();
+		} catch (e) {
+			/* panel not laid out yet */
+		}
+	}
+
+	close_terminal() {
+		if (this._ws_timer) clearTimeout(this._ws_timer);
+		if (this._on_data) this._on_data.dispose();
+		if (this._on_resize) this._on_resize.dispose();
+		this._on_data = this._on_resize = null;
+		if (this.ws) {
+			try {
+				this.ws.close();
+			} catch (e) {
+				/* noop */
+			}
+			this.ws = null;
+		}
+		if (this.term) {
+			this.term.dispose();
+			this.term = null;
+			this.fit_addon = null;
+		}
 	}
 
 	/* ------------------------------ Theme ------------------------------- */

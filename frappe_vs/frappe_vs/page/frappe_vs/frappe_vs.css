@@ -405,6 +405,41 @@
 	font-size: 12px;
 }
 
+.fvs-terminal-panel {
+	flex: 0 0 auto;
+	height: 240px;
+	display: flex;
+	flex-direction: column;
+	border-top: 2px solid var(--fvs-border);
+	background: var(--fvs-bg);
+}
+.fvs-terminal-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 3px 10px;
+	background: var(--fvs-panel);
+	border-bottom: 1px solid var(--fvs-border);
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--fvs-muted);
+}
+.fvs-terminal-cwd {
+	flex: 1 1 auto;
+	text-transform: none;
+	letter-spacing: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.fvs-terminal-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	padding: 4px 6px;
+	overflow: hidden;
+}
+
 .fvs-statusbar {
 	display: flex;
 	align-items: center;
@@ -421,128 +456,4 @@
 }
 .fvs-status-right {
 	opacity: 0.95;
-}
-
-/* ------------------------------------------------------------------ *
- * Copilot panel — sits to the right of the editor, like the explorer
- * sits to its left.
- * ------------------------------------------------------------------ */
-.fvs-copilot {
-	display: flex;
-	flex-direction: column;
-	width: 340px;
-	min-width: 280px;
-	border-left: 1px solid var(--fvs-border, #e2e2e2);
-	background: var(--fvs-panel-bg, #fff);
-}
-
-.fvs-copilot-head {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 6px 10px;
-	border-bottom: 1px solid var(--fvs-border, #e2e2e2);
-	font-size: 12px;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-}
-
-.fvs-copilot-title {
-	flex: 1;
-	font-weight: 600;
-}
-
-.fvs-copilot-model {
-	font-size: 11px;
-	text-transform: none;
-	letter-spacing: 0;
-	opacity: 0.6;
-}
-
-.fvs-copilot-log {
-	flex: 1;
-	overflow-y: auto;
-	padding: 10px;
-	font-size: 13px;
-	line-height: 1.5;
-}
-
-.fvs-copilot-msg {
-	margin-bottom: 10px;
-	white-space: pre-wrap;
-	word-break: break-word;
-}
-
-.fvs-copilot-user {
-	padding: 6px 8px;
-	border-radius: 6px;
-	background: var(--fvs-hover-bg, #f4f4f4);
-}
-
-.fvs-copilot-system {
-	opacity: 0.65;
-	font-size: 12px;
-}
-
-.fvs-copilot-composer {
-	display: flex;
-	gap: 6px;
-	padding: 8px;
-	border-top: 1px solid var(--fvs-border, #e2e2e2);
-}
-
-.fvs-copilot-input {
-	flex: 1;
-	resize: none;
-	border: 1px solid var(--fvs-border, #e2e2e2);
-	border-radius: 6px;
-	padding: 6px 8px;
-	font: inherit;
-	font-size: 13px;
-	background: transparent;
-	color: inherit;
-}
-
-.fvs-changeset {
-	margin: 4px 0 12px;
-	border: 1px solid var(--fvs-border, #e2e2e2);
-	border-radius: 8px;
-	overflow: hidden;
-}
-
-.fvs-changeset-head {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 6px 10px;
-	background: var(--fvs-hover-bg, #f4f4f4);
-	font-size: 12px;
-}
-
-.fvs-changeset-title {
-	flex: 1;
-	font-weight: 600;
-}
-
-.fvs-changeset-status {
-	font-size: 11px;
-	opacity: 0.7;
-}
-
-.fvs-changeset-list {
-	margin: 0;
-	padding: 8px 10px 8px 24px;
-	font-size: 12px;
-}
-
-.fvs-changeset-actions {
-	display: flex;
-	gap: 6px;
-	padding: 8px 10px;
-	border-top: 1px solid var(--fvs-border, #e2e2e2);
-}
-
-.fvs-dark .fvs-copilot,
-.fvs-dark .fvs-changeset-head {
-	background: #1e1e1e;
 }
