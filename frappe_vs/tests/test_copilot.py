@@ -7,7 +7,19 @@ from frappe.tests.utils import FrappeTestCase
 from frappe_vs import copilot
 
 
+# Custom fields commit as they are written, so a test that dies mid-way can
+# leave one behind. Each test starts by clearing its own.
+SCRATCH_FIELDS = ("Item-po_number", "Item-shelf_code")
+
+
 class TestCopilot(FrappeTestCase):
+	def setUp(self):
+		for name in SCRATCH_FIELDS:
+			if frappe.db.exists("Custom Field", name):
+				frappe.delete_doc("Custom Field", name, force=True, ignore_permissions=True)
+		frappe.db.commit()
+		frappe.clear_cache(doctype="Item")
+
 	def tearDown(self):
 		frappe.db.rollback()
 
