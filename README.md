@@ -6,6 +6,16 @@ A VS Code-like IDE that lives **inside Frappe Desk**, powered by the
 Open it at **`/app/frappe_vs`**, or from the **Frappe VS** workspace in the Desk
 sidebar (System Manager only).
 
+## Screenshots
+
+![A Client Script open in Frappe VS (Mode B, the safe object console)](docs/screenshots/frappe-vs-editor.png)
+*A Client Script open in Frappe VS (Mode B, the safe object console)*
+
+![The explorer: every editable object type in one tree](docs/screenshots/frappe-vs-explorer.png)
+*The explorer: every editable object type in one tree*
+
+Recorded on a demo site with made-up data.
+
 ## What it is
 
 Frappe VS is a Frappe custom app (no React build, no Node toolchain required).
